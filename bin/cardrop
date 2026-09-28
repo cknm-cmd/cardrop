@@ -1,0 +1,213 @@
+#!/bin/bash
+# cardrop command-line control.
+
+SELF="$0"
+[ -L "$SELF" ] && SELF="$(readlink "$SELF")"
+. "$(dirname "$SELF")/common.sh"
+
+usage() {
+    cat <<EOF
+cardrop $CARDROP_VERSION: plug in a camera or SD card, and new files upload one-way to the cloud.
+
+Usage: cardrop <command>
+
+  status               Show whether cardrop is active, and each device's last result
+  pause                Stop any upload in progress and skip uploads until resumed
+  resume               Turn uploads back on (starts right away if a device is connected)
+  run                  Check connected devices now
+  log [-f]             Show the recent log (-f to follow it live)
+  config               Open the device list (~/.config/cardrop/devices.conf)
+  connect <remote> [client_secret.json]
+                       Connect an rclone Google Drive remote using your own OAuth client
+  doctor               Check rclone, the destinations, device access and notifications
+  test-notify          Send a test notification
+  version              Show the version
+EOF
+}
+
+die() { echo "cardrop: $*" >&2; exit 1; }
+
+cmd_status() {
+    if [ -f "$PAUSED_FILE" ]; then echo "cardrop:  ⏸  paused"; else echo "cardrop:  ▶️  active"; fi
+    if running_pid >/dev/null; then echo "Upload:   in progress"; else echo "Upload:   idle"; fi
+    load_devices
+    if [ ${#DEVICES[@]} -eq 0 ]; then
+        echo
+        echo "No devices configured yet. Run: cardrop config"
+        return
+    fi
+    for device in "${DEVICES[@]}"; do
+        IFS='|' read -r vol src dst <<< "$device"
+        echo
+        echo "• $vol"
+        if [ -d "/Volumes/$vol" ]; then echo "    Connected:  yes"; else echo "    Connected:  no"; fi
+        echo "    Uploads:    $src → $dst"
+        last="$DEVICE_STATE_DIR/$(device_slug "$vol").last"
+        if [ -f "$last" ]; then echo "    Last run:   $(cat "$last")"; else echo "    Last run:   never"; fi
+    done
+}
+
+cmd_pause() {
+    mkdir -p "$SUPPORT_DIR"
+    touch "$PAUSED_FILE"
+    if running_pid >/dev/null; then
+        # Stop rclone; the worker sees the pause flag and exits quietly.
+        pkill -TERM -f "rclone (copy|check) /Volumes/" 2>/dev/null
+        echo "⏸  Paused. The upload in progress was stopped. Files already uploaded are kept."
+    else
+        echo "⏸  Paused. Connecting a device won't upload anything until you run: cardrop resume"
+    fi
+}
+
+cmd_resume() {
+    rm -f "$PAUSED_FILE"
+    launchctl kickstart "gui/$(id -u)/$CARDROP_LABEL" 2>/dev/null
+    echo "▶️  Resumed. Any connected device is being checked now."
+}
+
+cmd_run() {
+    [ -f "$PAUSED_FILE" ] && die "cardrop is paused. Run: cardrop resume"
+    if running_pid >/dev/null; then echo "An upload is already in progress."; return; fi
+    launchctl kickstart "gui/$(id -u)/$CARDROP_LABEL" || die "The background job isn't loaded. Re-run install.sh."
+    echo "Checking connected devices. Follow along with: cardrop log -f"
+}
+
+cmd_log() {
+    [ -f "$LOG_FILE" ] || die "No log yet ($LOG_FILE)."
+    if [ "${1:-}" = "-f" ]; then tail -n 40 -f "$LOG_FILE"; else tail -n 40 "$LOG_FILE"; fi
+}
+
+cmd_config() {
+    mkdir -p "$CONFIG_DIR"
+    [ -f "$DEVICES_FILE" ] || cp "$SUPPORT_DIR/devices.conf.example" "$DEVICES_FILE"
+    echo "Device list: $DEVICES_FILE"
+    open -t "$DEVICES_FILE"
+}
+
+cmd_connect() {
+    local remote="${1:-}" json="${2:-}" id secret
+    [ -n "$remote" ] || die "usage: cardrop connect <remote-name> [client_secret.json]"
+    remote="${remote%:}"
+    command -v rclone >/dev/null || die "rclone isn't installed. Run: brew install rclone"
+    if [ -z "$json" ]; then
+        json=$(ls -t "$HOME"/Downloads/client_secret_*.json 2>/dev/null | head -1)
+    fi
+    [ -n "$json" ] && [ -f "$json" ] || die "Couldn't find your OAuth client JSON. Pass its path: cardrop connect $remote /path/to/client_secret_....json"
+    id=$(plutil -extract installed.client_id raw -o - "$json" 2>/dev/null)
+    secret=$(plutil -extract installed.client_secret raw -o - "$json" 2>/dev/null)
+    [ -n "$id" ] && [ -n "$secret" ] || die "$json isn't a Desktop app OAuth client file (no 'installed' section)."
+
+    echo "Using OAuth client from: $json"
+    echo "A browser window will open. Pick the Google account the files should go to, then Allow."
+    echo "(If Google says it hasn't verified the app, click Continue: it's your own client.)"
+    echo
+    if rclone listremotes | grep -qx "$remote:"; then
+        rclone config update "$remote" client_id="$id" client_secret="$secret" config_refresh_token=false >/dev/null
+        rclone config reconnect "$remote:" --auto-confirm
+    else
+        rclone config create "$remote" drive scope=drive client_id="$id" client_secret="$secret" >/dev/null
+    fi
+    echo
+    if rclone lsf "$remote:" --max-depth 1 >/dev/null 2>&1; then
+        echo "✅ Connected. Use destinations like  $remote:Camera uploads  in your device list."
+    else
+        die "The remote was saved, but a test listing failed. Try: rclone lsd $remote:"
+    fi
+}
+
+cmd_doctor() {
+    local problems=0
+    ok()   { echo "  ✅ $*"; }
+    warn() { echo "  ⚠️  $*"; problems=$((problems + 1)); }
+
+    echo "Setup"
+    if command -v rclone >/dev/null; then ok "rclone $(rclone version | head -1 | awk '{print $2}')"; else warn "rclone not installed: brew install rclone"; fi
+    if [ -x "$HELPER" ]; then ok "Cardrop.app installed"; else warn "Cardrop.app missing: re-run install.sh"; fi
+    if launchctl print "gui/$(id -u)/$CARDROP_LABEL" >/dev/null 2>&1; then ok "Background job loaded"; else warn "Background job not loaded: re-run install.sh"; fi
+    if [ -f "$PAUSED_FILE" ]; then warn "cardrop is paused (cardrop resume)"; else ok "Active (not paused)"; fi
+
+    load_devices
+    echo
+    echo "Devices"
+    if [ ${#DEVICES[@]} -eq 0 ]; then
+        warn "No devices configured: cardrop config"
+    fi
+    local connected=0
+    for device in "${DEVICES[@]}"; do
+        IFS='|' read -r vol src dst <<< "$device"
+        echo "  • $vol ($src → $dst)"
+        if rclone lsf "${dst%%:*}:" --max-depth 1 >/dev/null 2>&1; then
+            if rclone lsf "$dst" --max-depth 1 >/dev/null 2>&1; then
+                ok "  destination reachable"
+            else
+                ok "  remote reachable (folder will be created on first upload)"
+            fi
+        else
+            warn "  can't reach remote '${dst%%:*}:'. Check the name with: rclone listremotes"
+        fi
+        [ -d "/Volumes/$vol" ] && connected=1
+    done
+
+    if [ "$connected" -eq 1 ]; then
+        echo
+        echo "Device access (as Cardrop.app)"
+        if running_pid >/dev/null; then
+            ok "An upload is running, so access is working"
+        else
+            rm -f "$PROBE_RESULT"
+            touch "$PROBE_REQUEST"
+            launchctl kickstart "gui/$(id -u)/$CARDROP_LABEL" 2>/dev/null
+            echo "  (If macOS asks whether Cardrop can access a removable volume, click Allow.)"
+            for _ in $(seq 60); do [ -f "$PROBE_RESULT" ] && break; sleep 1; done
+            if [ ! -f "$PROBE_RESULT" ]; then
+                warn "No answer. Check for a macOS permission prompt, then run cardrop doctor again"
+            else
+                while IFS='|' read -r vol result; do
+                    case "$result" in
+                        ok) ok "$vol: readable" ;;
+                        "not connected") ;;
+                        denied) warn "$vol: blocked. Allow Cardrop in System Settings → Privacy & Security → Files & Folders → Removable Volumes" ;;
+                        *) warn "$vol: $result" ;;
+                    esac
+                done < "$PROBE_RESULT"
+            fi
+            rm -f "$PROBE_REQUEST"
+        fi
+    fi
+
+    echo
+    echo "Notifications"
+    if [ "$("$HELPER" notify-check 2>/dev/null)" = "denied" ]; then
+        warn "Notifications are off: System Settings → Notifications → Cardrop → Allow notifications"
+    elif "$HELPER" notify "cardrop" "Test notification from cardrop doctor." Glass 2>/dev/null; then
+        ok "Sent a test notification (check Notification Centre if no banner appeared)"
+    else
+        warn "Notifications aren't allowed yet: System Settings → Notifications → Cardrop → Allow notifications"
+    fi
+
+    echo
+    if [ "$problems" -eq 0 ]; then echo "Everything looks good."; else echo "$problems thing(s) need attention."; fi
+}
+
+cmd_test_notify() {
+    if [ "$("$HELPER" notify-check 2>/dev/null)" = "denied" ]; then
+        die "Notifications are off. Turn them on in System Settings → Notifications → Cardrop."
+    fi
+    "$HELPER" notify "cardrop" "Notifications are working." Glass
+    echo "Sent. If no banner appeared, check Notification Centre (click the clock in the menu bar)."
+}
+
+case "${1:-status}" in
+    status) cmd_status ;;
+    pause) cmd_pause ;;
+    resume) cmd_resume ;;
+    run) cmd_run ;;
+    log) cmd_log "${2:-}" ;;
+    config) cmd_config ;;
+    connect) cmd_connect "${2:-}" "${3:-}" ;;
+    doctor) cmd_doctor ;;
+    test-notify) cmd_test_notify ;;
+    version|--version|-v) echo "cardrop $CARDROP_VERSION" ;;
+    help|--help|-h) usage ;;
+    *) usage; exit 1 ;;
+esac

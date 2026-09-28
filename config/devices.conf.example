@@ -1,0 +1,20 @@
+# cardrop device list
+#
+# One line per device:
+#
+#     VOLUME NAME | FOLDER ON DEVICE | DESTINATION
+#
+#   VOLUME NAME   The device's name as shown in Finder when it's plugged in (as under /Volumes).
+#   FOLDER        The folder to upload, usually DCIM. Use . for the whole device.
+#   DESTINATION   An rclone remote and folder, e.g.  gdrive:Camera uploads
+#
+# Files are only ever added to the destination. Nothing there is deleted or overwritten,
+# so you can safely clear the device after the "✅ upload verified" notification.
+# Lines starting with # are ignored.
+#
+# Examples (remove the # to use one):
+#
+# Insta360 X5  | DCIM | gdrive:Insta360
+# GoPro        | DCIM | gdrive:GoPro
+# DJI Mini 4   | DCIM | gdrive:Drone footage
+# Untitled     | .    | gdrive:SD card dumps

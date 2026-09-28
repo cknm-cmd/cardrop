@@ -1,0 +1,6 @@
+# Optional cardrop settings. Save as ~/.config/cardrop/settings.conf and uncomment what you change.
+
+# TRANSFERS=4            # files uploaded in parallel
+# CHUNK_SIZE=64M         # Google Drive upload chunk size (RAM used is about TRANSFERS x CHUNK_SIZE)
+# VERIFY=checksum        # checksum (safest) or size (faster: compares file sizes only)
+# NOTIFY_ON_START=yes    # also notify when an upload starts (yes or no)
