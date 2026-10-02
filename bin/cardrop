@@ -12,6 +12,7 @@ cardrop $CARDROP_VERSION: plug in a camera or SD card, and new files upload one-
 Usage: cardrop <command>
 
   status               Show whether cardrop is active, and each device's last result
+  progress [-w]        Show live upload progress: size, files, speed, time left (-w to keep updating)
   pause                Stop any upload in progress and skip uploads until resumed
   resume               Turn uploads back on (starts right away if a device is connected)
   run                  Check connected devices now
@@ -27,9 +28,44 @@ EOF
 
 die() { echo "cardrop: $*" >&2; exit 1; }
 
+# Prints the current upload's progress. Mode: full (multi-line) or line (one line, for status).
+progress_report() {
+    local mode="$1" phase vol dst expected port pass started json
+    if [ ! -f "$CURRENT_FILE" ]; then
+        if [ "$mode" = "full" ]; then
+            if running_pid >/dev/null; then echo "Checking the device (listing files, comparing with the destination)..."
+            else echo "No upload running."; fi
+        fi
+        return
+    fi
+    { read -r phase; read -r vol; read -r dst; read -r expected; read -r port; read -r pass; read -r started; } < "$CURRENT_FILE"
+    [ -n "$port" ] && json=$(rclone rc --url "http://127.0.0.1:$port/" --user cardrop --pass "$pass" core/stats 2>/dev/null)
+    if [ -z "$json" ]; then
+        [ "$mode" = "full" ] && echo "Starting up ($phase $vol)..." || echo "starting..."
+        return
+    fi
+    printf '%s' "$json" | /usr/bin/python3 "$(dirname "$SELF")/progress.py" "$mode" "$phase" "$vol" "$dst" "$expected" "$started"
+}
+
+cmd_progress() {
+    if [ "${1:-}" != "-w" ]; then progress_report full; return; fi
+    while :; do
+        report=$(progress_report full)
+        printf '\033[H\033[2J%s\n\n(Updates every 2 seconds. Ctrl-C to stop watching; the upload keeps going.)\n' "$report"
+        if [ ! -f "$CURRENT_FILE" ] && ! running_pid >/dev/null; then break; fi
+        sleep 2
+    done
+}
+
 cmd_status() {
     if [ -f "$PAUSED_FILE" ]; then echo "cardrop:  ⏸  paused"; else echo "cardrop:  ▶️  active"; fi
-    if running_pid >/dev/null; then echo "Upload:   in progress"; else echo "Upload:   idle"; fi
+    if running_pid >/dev/null; then
+        line=$(progress_report line)
+        echo "Upload:   in progress${line:+ ($line)}"
+        echo "          Live details: cardrop progress -w"
+    else
+        echo "Upload:   idle"
+    fi
     load_devices
     if [ ${#DEVICES[@]} -eq 0 ]; then
         echo
@@ -199,6 +235,7 @@ cmd_test_notify() {
 
 case "${1:-status}" in
     status) cmd_status ;;
+    progress) cmd_progress "${2:-}" ;;
     pause) cmd_pause ;;
     resume) cmd_resume ;;
     run) cmd_run ;;

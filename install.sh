@@ -74,7 +74,7 @@ fi
 
 # 3. Scripts (outside the app, so updating them doesn't touch its permissions)
 mkdir -p "$SUPPORT_DIR" "$DEVICE_STATE_DIR"
-cp "$REPO/libexec/common.sh" "$REPO/libexec/cardrop-run.sh" "$REPO/bin/cardrop" "$SUPPORT_DIR/"
+cp "$REPO/libexec/common.sh" "$REPO/libexec/cardrop-run.sh" "$REPO/libexec/progress.py" "$REPO/bin/cardrop" "$SUPPORT_DIR/"
 cp "$REPO/config/devices.conf.example" "$REPO/config/settings.conf.example" "$SUPPORT_DIR/"
 chmod +x "$SUPPORT_DIR/cardrop" "$SUPPORT_DIR/cardrop-run.sh"
 

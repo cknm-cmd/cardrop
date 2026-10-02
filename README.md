@@ -80,7 +80,15 @@ Then:
 
 ## Daily use
 
-1. Plug in the device. You'll see **"⬆️ Uploading N new files"**.
+1. Plug in the device. You'll see **"⬆️ Uploading N new files"**. To watch it, run `cardrop progress -w`:
+   ```
+   ⬆️   Insta360 X5 → gdrive:Insta360
+       Progress:  38.2 GB / 104.6 GB  (37%)
+       Files:     6 / 17 done
+       Speed:     5.1 MB/s     Time left: ~3h 37m
+       Elapsed:   2h 05m
+       Now:       VID_20261001_153054_00_006.insv   62%
+   ```
 2. Leave it connected. For long uploads, keep the Mac on power or the lid open: cardrop stops idle sleep, but closing the lid on battery still sleeps the Mac.
 3. When **"✅ upload verified. Safe to clear the device"** appears, format the card.
 
@@ -91,7 +99,8 @@ cardrop continues, skipping files that are already uploaded.
 
 | Command | What it does |
 |---|---|
-| `cardrop status` | Active or paused, and each device's connection and last result |
+| `cardrop status` | Active or paused, a one-line progress summary, and each device's connection and last result |
+| `cardrop progress [-w]` | Live upload progress: size, files, speed, time left, files in flight (`-w` keeps it updating) |
 | `cardrop pause` | Stop any upload in progress and skip uploads until resumed (survives restarts) |
 | `cardrop resume` | Turn uploads back on; starts immediately if a device is connected |
 | `cardrop run` | Check connected devices now |
@@ -126,6 +135,8 @@ Any [rclone remote](https://rclone.org/overview/) works as a destination. Set it
   The app is built only once. Updating cardrop replaces only the scripts, so permissions aren't asked for again.
 - Uploads use `rclone copy --ignore-existing`, which only adds files. Verification uses
   `rclone check --one-way` (size + checksum).
+- While it runs, rclone serves live stats on `127.0.0.1` (a free port from 5573 to 5599), protected
+  by a random password generated for each run. That's what `cardrop progress` reads.
 - Hidden files (`.Trashes`, `._*`, `.Spotlight-V100`) are skipped.
 
 | Path | Contents |

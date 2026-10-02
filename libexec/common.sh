@@ -1,6 +1,6 @@
 # Shared paths, settings and helpers for cardrop. Sourced by the CLI, the worker and the installer.
 
-CARDROP_VERSION="1.0.0"
+CARDROP_VERSION="1.1.0"
 CARDROP_LABEL="io.github.cknm-cmd.cardrop"
 
 CONFIG_DIR="$HOME/.config/cardrop"
@@ -13,6 +13,7 @@ LOCK_FILE="$SUPPORT_DIR/lock"
 PAUSED_FILE="$SUPPORT_DIR/paused"
 PROBE_REQUEST="$SUPPORT_DIR/probe-request"
 PROBE_RESULT="$SUPPORT_DIR/probe-result"
+CURRENT_FILE="$SUPPORT_DIR/current"   # live upload info for `cardrop progress` (mode 600)
 
 LOG_FILE="$HOME/Library/Logs/cardrop.log"
 APP_PATH="$HOME/Applications/Cardrop.app"

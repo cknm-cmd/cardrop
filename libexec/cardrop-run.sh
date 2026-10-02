@@ -47,7 +47,7 @@ fi
 # One run at a time.
 if running_pid >/dev/null; then exit 0; fi
 echo $$ > "$LOCK_FILE"
-trap 'rm -f "$LOCK_FILE"' EXIT
+trap 'rm -f "$LOCK_FILE" "$CURRENT_FILE"' EXIT
 
 RCLONE=$(command -v rclone)
 if [ -z "$RCLONE" ]; then
@@ -57,6 +57,20 @@ if [ -z "$RCLONE" ]; then
 fi
 
 PROCESSED=" "   # "slug:fingerprint" pairs handled during this run
+
+# rclone serves live stats on localhost while it runs, so `cardrop progress` can read them.
+# A free port and a one-off password are chosen per run and kept in $CURRENT_FILE (mode 600).
+RC_PORT=""
+for port in $(seq 5573 5599); do
+    if ! nc -z 127.0.0.1 "$port" 2>/dev/null; then RC_PORT=$port; break; fi
+done
+RC_PASS=$(openssl rand -hex 16)
+RC_FLAGS=()
+[ -n "$RC_PORT" ] && RC_FLAGS=(--rc --rc-addr "127.0.0.1:$RC_PORT" --rc-user cardrop --rc-pass "$RC_PASS")
+
+set_current() {  # phase, volume, destination, pending
+    (umask 077; printf '%s\n' "$1" "$2" "$3" "$4" "$RC_PORT" "$RC_PASS" "$(date +%s)" > "$CURRENT_FILE")
+}
 
 # Returns 0 if it did any work (uploaded or verified), 1 if there was nothing to do.
 process_device() {
@@ -101,10 +115,11 @@ process_device() {
 
     log "=== $vol: $total files, $pending new -> $dst ==="
     if [ "$pending" -gt 0 ]; then
-        [ "$NOTIFY_ON_START" = "yes" ] && notify "⬆️ $vol: uploading $pending new files" "Keep it connected until you see ✅." Pop
+        [ "$NOTIFY_ON_START" = "yes" ] && notify "⬆️ $vol: uploading $pending new files" "Keep it connected until you see ✅. Progress: cardrop progress" Pop
+        set_current uploading "$vol" "$dst" "$pending"
         # caffeinate stops the Mac idle-sleeping during long uploads.
         caffeinate -i "$RCLONE" copy "$src" "$dst" \
-            --ignore-existing "${FILTERS[@]}" \
+            --ignore-existing "${FILTERS[@]}" "${RC_FLAGS[@]}" \
             --transfers "$TRANSFERS" --drive-chunk-size "$CHUNK_SIZE" \
             --retries 5 --low-level-retries 20 \
             --stats 5m --stats-one-line -v
@@ -126,8 +141,10 @@ process_device() {
     log "$vol: verifying against $dst ($VERIFY)..."
     local verify_flags=()
     [ "$VERIFY" = "size" ] && verify_flags=(--size-only)
-    out=$(caffeinate -i "$RCLONE" check "$src" "$dst" --one-way "${FILTERS[@]}" "${verify_flags[@]}" 2>&1)
+    set_current verifying "$vol" "$dst" "$total"
+    out=$(caffeinate -i "$RCLONE" check "$src" "$dst" --one-way "${FILTERS[@]}" "${verify_flags[@]}" "${RC_FLAGS[@]}" 2>&1)
     status=$?
+    rm -f "$CURRENT_FILE"
     printf '%s\n' "$out"
 
     if [ -f "$PAUSED_FILE" ]; then
