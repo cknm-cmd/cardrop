@@ -106,6 +106,8 @@ cat > "$PLIST" <<EOF
     <key>ProgramArguments</key>
     <array><string>$HELPER</string></array>
     <key>StartOnMount</key><true/>
+    <key>WatchPaths</key>
+    <array><string>/Volumes</string></array>
     <key>RunAtLoad</key><true/>
     <key>ProcessType</key><string>Background</string>
 </dict>

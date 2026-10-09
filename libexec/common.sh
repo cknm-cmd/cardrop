@@ -1,6 +1,6 @@
 # Shared paths, settings and helpers for cardrop. Sourced by the CLI, the worker and the installer.
 
-CARDROP_VERSION="1.1.0"
+CARDROP_VERSION="1.2.0"
 CARDROP_LABEL="io.github.cknm-cmd.cardrop"
 
 CONFIG_DIR="$HOME/.config/cardrop"
@@ -71,6 +71,22 @@ source_path() {  # volume, folder
 
 device_slug() {  # volume name -> safe file name
     printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+# Identifies the current connection of a mounted volume (macOS assigns a device number per mount).
+connection_id() {
+    stat -f %d "/Volumes/$1" 2>/dev/null
+}
+
+# `cardrop cancel` marks a device as skipped until it's unplugged.
+cancel_marker() {
+    echo "$DEVICE_STATE_DIR/$(device_slug "$1").cancelled"
+}
+
+is_cancelled() {  # volume
+    local marker
+    marker=$(cancel_marker "$1")
+    [ -f "$marker" ] && [ "$(cat "$marker")" = "$(connection_id "$1")" ]
 }
 
 running_pid() {

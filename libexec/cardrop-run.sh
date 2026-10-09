@@ -31,6 +31,16 @@ if [ -f "$PROBE_REQUEST" ]; then
     exit 0
 fi
 
+# A cancel only lasts while the device stays plugged in: forget it once the device is gone.
+# (launchd also runs this worker when /Volumes changes, so unplugging triggers this cleanup.)
+for device in "${DEVICES[@]}"; do
+    IFS='|' read -r vol _ _ <<< "$device"
+    marker=$(cancel_marker "$vol")
+    if [ -f "$marker" ] && { [ ! -d "/Volumes/$vol" ] || ! is_cancelled "$vol"; }; then
+        rm -f "$marker"
+    fi
+done
+
 # launchd fires for every volume that mounts; stay silent unless a configured device is present.
 connected=0
 for device in "${DEVICES[@]}"; do
@@ -58,6 +68,21 @@ fi
 
 PROCESSED=" "   # "slug:fingerprint" pairs handled during this run
 
+# True (and logged) if the user paused cardrop or cancelled this device while it was working.
+stopped_by_user() {  # volume, slug
+    if [ -f "$PAUSED_FILE" ]; then
+        log "$1: stopped because cardrop was paused. Files already uploaded are kept."
+        record "$2" "⏸ paused before finishing"
+        return 0
+    fi
+    if is_cancelled "$1"; then
+        log "$1: cancelled. Files already uploaded are kept; it won't upload again until reconnected."
+        record "$2" "✖ cancelled (uploads again next time it's plugged in)"
+        return 0
+    fi
+    return 1
+}
+
 # rclone serves live stats on localhost while it runs, so `cardrop progress` can read them.
 # A free port and a one-off password are chosen per run and kept in $CURRENT_FILE (mode 600).
 RC_PORT=""
@@ -81,6 +106,7 @@ process_device() {
     state="$DEVICE_STATE_DIR/$slug.verified"
 
     [ -d "/Volumes/$vol" ] || return 1
+    is_cancelled "$vol" && return 1
     if [ ! -d "$src" ]; then
         log "$vol: folder '$src_rel' not found on the device. Skipping."
         return 1
@@ -102,6 +128,7 @@ process_device() {
 
     dry=$("$RCLONE" copy "$src" "$dst" --ignore-existing "${FILTERS[@]}" --dry-run 2>&1)
     if [ $? -ne 0 ]; then
+        stopped_by_user "$vol" "$slug" && return 1
         log "$vol: can't reach $dst"
         printf '%s\n' "$dry" | tail -5
         record "$slug" "⚠️ couldn't reach $dst"
@@ -126,11 +153,7 @@ process_device() {
         log "$vol: upload finished (status $?)."
     fi
 
-    if [ -f "$PAUSED_FILE" ]; then
-        log "$vol: stopped because cardrop was paused. Uploaded files are kept."
-        record "$slug" "⏸ paused before finishing"
-        return 1
-    fi
+    stopped_by_user "$vol" "$slug" && return 1
     if [ ! -d "$src" ]; then
         log "$vol: disconnected before the upload finished."
         record "$slug" "⚠️ disconnected before finishing"
@@ -147,11 +170,7 @@ process_device() {
     rm -f "$CURRENT_FILE"
     printf '%s\n' "$out"
 
-    if [ -f "$PAUSED_FILE" ]; then
-        log "$vol: verification stopped because cardrop was paused."
-        record "$slug" "⏸ paused before verifying"
-        return 1
-    fi
+    stopped_by_user "$vol" "$slug" && return 1
 
     matched=$(printf '%s\n' "$out" | sed -nE 's/.* ([0-9]+) matching files.*/\1/p' | tail -1)
     if [ "$status" -eq 0 ]; then

@@ -13,6 +13,8 @@ Usage: cardrop <command>
 
   status               Show whether cardrop is active, and each device's last result
   progress [-w]        Show live upload progress: size, files, speed, time left (-w to keep updating)
+  cancel               Stop the current upload and skip connected devices until they're unplugged
+                       (auto-upload stays on for the next plug-in)
   pause                Stop any upload in progress and skip uploads until resumed
   resume               Turn uploads back on (starts right away if a device is connected)
   run                  Check connected devices now
@@ -76,10 +78,45 @@ cmd_status() {
         IFS='|' read -r vol src dst <<< "$device"
         echo
         echo "• $vol"
-        if [ -d "/Volumes/$vol" ]; then echo "    Connected:  yes"; else echo "    Connected:  no"; fi
+        if is_cancelled "$vol"; then echo "    Connected:  yes (✖ cancelled until unplugged; cardrop run to start now)"
+        elif [ -d "/Volumes/$vol" ]; then echo "    Connected:  yes"
+        else echo "    Connected:  no"; fi
         echo "    Uploads:    $src → $dst"
         last="$DEVICE_STATE_DIR/$(device_slug "$vol").last"
         if [ -f "$last" ]; then echo "    Last run:   $(cat "$last")"; else echo "    Last run:   never"; fi
+    done
+}
+
+cmd_cancel() {
+    load_devices
+    local cancelled=0
+    mkdir -p "$DEVICE_STATE_DIR"
+    for device in "${DEVICES[@]}"; do
+        IFS='|' read -r vol _ _ <<< "$device"
+        [ -d "/Volumes/$vol" ] || continue
+        connection_id "$vol" > "$(cancel_marker "$vol")"
+        cancelled=$((cancelled + 1))
+    done
+    if [ "$cancelled" -eq 0 ]; then
+        echo "No configured device is connected, so there's nothing to cancel."
+        return
+    fi
+    if running_pid >/dev/null; then
+        pkill -TERM -f "rclone (copy|check) /Volumes/" 2>/dev/null
+        echo "✖  Upload cancelled. Files already uploaded are kept."
+    else
+        echo "✖  Cancelled."
+    fi
+    echo "   Connected devices won't upload again until you unplug and reconnect them."
+    echo "   (Changed your mind? cardrop run starts it again now.)"
+    [ -f "$PAUSED_FILE" ] && echo "   Note: cardrop is also paused. Run cardrop resume to turn auto-upload back on."
+}
+
+clear_cancels() {
+    load_devices
+    for device in "${DEVICES[@]}"; do
+        IFS='|' read -r vol _ _ <<< "$device"
+        rm -f "$(cancel_marker "$vol")"
     done
 }
 
@@ -97,6 +134,7 @@ cmd_pause() {
 
 cmd_resume() {
     rm -f "$PAUSED_FILE"
+    clear_cancels
     launchctl kickstart "gui/$(id -u)/$CARDROP_LABEL" 2>/dev/null
     echo "▶️  Resumed. Any connected device is being checked now."
 }
@@ -104,6 +142,7 @@ cmd_resume() {
 cmd_run() {
     [ -f "$PAUSED_FILE" ] && die "cardrop is paused. Run: cardrop resume"
     if running_pid >/dev/null; then echo "An upload is already in progress."; return; fi
+    clear_cancels
     launchctl kickstart "gui/$(id -u)/$CARDROP_LABEL" || die "The background job isn't loaded. Re-run install.sh."
     echo "Checking connected devices. Follow along with: cardrop log -f"
 }
@@ -236,6 +275,7 @@ cmd_test_notify() {
 case "${1:-status}" in
     status) cmd_status ;;
     progress) cmd_progress "${2:-}" ;;
+    cancel) cmd_cancel ;;
     pause) cmd_pause ;;
     resume) cmd_resume ;;
     run) cmd_run ;;

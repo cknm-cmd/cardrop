@@ -92,6 +92,10 @@ Then:
 2. Leave it connected. For long uploads, keep the Mac on power or the lid open: cardrop stops idle sleep, but closing the lid on battery still sleeps the Mac.
 3. When **"✅ upload verified. Safe to clear the device"** appears, format the card.
 
+Don't want this batch uploaded? Run `cardrop cancel` to stop it. The device is skipped until
+you unplug it, and the next plug-in uploads as normal. To turn auto-upload off entirely, use
+`cardrop pause` (and `cardrop resume` later).
+
 If you see **⚠️ incomplete** or **⚠️ disconnected**, don't clear the device. Reconnect it and
 cardrop continues, skipping files that are already uploaded.
 
@@ -101,7 +105,8 @@ cardrop continues, skipping files that are already uploaded.
 |---|---|
 | `cardrop status` | Active or paused, a one-line progress summary, and each device's connection and last result |
 | `cardrop progress [-w]` | Live upload progress: size, files, speed, time left, files in flight (`-w` keeps it updating) |
-| `cardrop pause` | Stop any upload in progress and skip uploads until resumed (survives restarts) |
+| `cardrop cancel` | Stop the current upload and skip the connected device until it's unplugged. Auto-upload stays on for the next plug-in |
+| `cardrop pause` | Stop any upload in progress and turn auto-upload off until resumed (survives restarts) |
 | `cardrop resume` | Turn uploads back on; starts immediately if a device is connected |
 | `cardrop run` | Check connected devices now |
 | `cardrop log [-f]` | Show the recent log (`-f` to follow live) |
@@ -128,8 +133,9 @@ Any [rclone remote](https://rclone.org/overview/) works as a destination. Set it
 
 ## How it works
 
-- A launchd agent (`io.github.cknm-cmd.cardrop`) runs whenever **any** volume mounts. It exits
-  straight away unless one of your configured devices is connected.
+- A launchd agent (`io.github.cknm-cmd.cardrop`) runs whenever **any** volume mounts or unmounts.
+  It exits straight away unless one of your configured devices is connected. The unmount trigger is
+  how a `cardrop cancel` gets forgotten once the device is unplugged.
 - It runs inside a tiny helper app, **Cardrop.app** (`~/Applications`), so macOS's "Removable Volumes"
   and notification permissions belong to Cardrop rather than to every shell script.
   The app is built only once. Updating cardrop replaces only the scripts, so permissions aren't asked for again.
