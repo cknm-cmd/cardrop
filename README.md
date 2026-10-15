@@ -1,5 +1,10 @@
 # cardrop
 
+> **Looking for an app instead of a command-line tool?** Try **[CardHaul](https://github.com/cknm-cmd/cardhaul)**:
+> the same one-way, verified camera-to-Drive upload as a menu bar / system tray app for **macOS and Windows**,
+> with one-click Google sign-in and no Homebrew or rclone setup. cardrop stays available for anyone who prefers
+> the terminal, scripting, or uploading to other clouds via rclone.
+
 **Plug in a camera or SD card, and cardrop uploads its new files straight to Google Drive (or any
 cloud rclone supports), checks every file, and tells you when it's safe to wipe the card.**
 
