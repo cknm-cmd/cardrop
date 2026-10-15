@@ -4,3 +4,7 @@
 # CHUNK_SIZE=64M         # Google Drive upload chunk size (RAM used is about TRANSFERS x CHUNK_SIZE)
 # VERIFY=checksum        # checksum (safest) or size (faster: compares file sizes only)
 # NOTIFY_ON_START=yes    # also notify when an upload starts (yes or no)
+
+# Files to never upload or verify. Defaults to camera index files that change after every
+# recording (Insta360's fileinfo_list.list). Add your own patterns like this:
+# SKIP_FILES+=("*.THM" "*.LRV")

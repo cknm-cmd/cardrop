@@ -118,7 +118,7 @@ process_device() {
         return 1
     fi
 
-    listing=$(cd "$src" && find . -type f -not -path '*/.*' -exec stat -f '%N %z %m' {} + 2>/dev/null | sort)
+    listing=$(cd "$src" && find . -type f -not -path '*/.*' "${FIND_SKIPS[@]}" -exec stat -f '%N %z %m' {} + 2>/dev/null | sort)
     [ -n "$listing" ] || return 1
     total=$(printf '%s\n' "$listing" | wc -l | tr -d ' ')
     fingerprint=$(printf '%s' "$listing" | shasum | cut -c1-16)
@@ -139,6 +139,10 @@ process_device() {
 
     # Same files as last time and all already uploaded: nothing to say.
     if [ "$pending" -eq 0 ] && [ "$(cat "$state" 2>/dev/null)" = "$fingerprint" ]; then return 1; fi
+    # Same files already failed verification during this connection: don't re-check on every mount.
+    if [ "$pending" -eq 0 ] && [ "$(cat "$(failed_marker "$vol")" 2>/dev/null)" = "$fingerprint $(connection_id "$vol")" ]; then
+        return 1
+    fi
 
     log "=== $vol: $total files, $pending new -> $dst ==="
     if [ "$pending" -gt 0 ]; then
@@ -175,13 +179,21 @@ process_device() {
     matched=$(printf '%s\n' "$out" | sed -nE 's/.* ([0-9]+) matching files.*/\1/p' | tail -1)
     if [ "$status" -eq 0 ]; then
         echo "$fingerprint" > "$state"
+        rm -f "$(failed_marker "$vol")"
         log "$vol: VERIFIED ${matched:-$total} files."
         record "$slug" "✅ verified ${matched:-$total} files"
         notify "✅ $vol: upload verified" "${matched:-$total} files are safely in $dst. Safe to clear the device." Glass
     else
-        log "$vol: VERIFY FAILED (status $status)."
-        record "$slug" "⚠️ verification failed"
-        notify "⚠️ $vol: upload incomplete" "Some files didn't verify. Don't clear the device. Reconnect it to retry." Basso
+        echo "$fingerprint $(connection_id "$vol")" > "$(failed_marker "$vol")"
+        # rclone prints e.g. "ERROR : Camera01/VID_x.insv: sizes differ" for each mismatch.
+        local bad count names
+        bad=$(printf '%s\n' "$out" | sed -nE 's/.*ERROR : (.+): ([^:]+)$/\1 (\2)/p' | awk '!seen[$0]++')
+        count=$(printf '%s' "$bad" | grep -c .)
+        names=$(printf '%s\n' "$bad" | head -3 | paste -sd ',' - | sed 's/,/, /g')
+        [ "$count" -gt 3 ] && names="$names and $((count - 3)) more"
+        log "$vol: VERIFY FAILED (status $status). Mismatched: ${names:-unknown}"
+        record "$slug" "⚠️ verification failed: ${names:-see cardrop log}"
+        notify "⚠️ $vol: ${count:-some} file(s) didn't verify" "${names:-See cardrop log.} Other files are fine. Don't clear the device until these are sorted out." Basso
     fi
     return 0
 }

@@ -102,8 +102,11 @@ cmd_cancel() {
         return
     fi
     if running_pid >/dev/null; then
+        local phase=""
+        [ -f "$CURRENT_FILE" ] && phase=$(head -1 "$CURRENT_FILE")
         pkill -TERM -f "rclone (copy|check) /Volumes/" 2>/dev/null
-        echo "✖  Upload cancelled. Files already uploaded are kept."
+        if [ "$phase" = "verifying" ]; then echo "✖  Verification cancelled. Uploaded files are untouched."
+        else echo "✖  Upload cancelled. Files already uploaded are kept."; fi
     else
         echo "✖  Cancelled."
     fi
@@ -112,11 +115,12 @@ cmd_cancel() {
     [ -f "$PAUSED_FILE" ] && echo "   Note: cardrop is also paused. Run cardrop resume to turn auto-upload back on."
 }
 
+# Forget cancels and failed-verification markers, so connected devices are checked afresh.
 clear_cancels() {
     load_devices
     for device in "${DEVICES[@]}"; do
         IFS='|' read -r vol _ _ <<< "$device"
-        rm -f "$(cancel_marker "$vol")"
+        rm -f "$(cancel_marker "$vol")" "$(failed_marker "$vol")"
     done
 }
 

@@ -1,6 +1,6 @@
 # Shared paths, settings and helpers for cardrop. Sourced by the CLI, the worker and the installer.
 
-CARDROP_VERSION="1.2.0"
+CARDROP_VERSION="1.2.1"
 CARDROP_LABEL="io.github.cknm-cmd.cardrop"
 
 CONFIG_DIR="$HOME/.config/cardrop"
@@ -28,10 +28,19 @@ TRANSFERS=4          # files uploaded in parallel
 CHUNK_SIZE=64M       # Google Drive upload chunk size; RAM used is about TRANSFERS x CHUNK_SIZE
 VERIFY=checksum      # checksum (safest) or size (faster)
 NOTIFY_ON_START=yes  # notify when an upload starts
+# Files never uploaded or verified: index files cameras rewrite after every recording, which would
+# otherwise fail verification forever (cardrop never overwrites, so Drive keeps the old copy).
+# Add your own in settings.conf, e.g.  SKIP_FILES+=("*.THM")
+SKIP_FILES=("fileinfo_list.list")
 [ -f "$SETTINGS_FILE" ] && . "$SETTINGS_FILE"
 
-# Skip hidden files and folders: macOS metadata, ._ files, .Trashes, .Spotlight-V100 and so on.
+# Skip hidden files and folders (macOS metadata, ._ files, .Trashes, .Spotlight-V100) and SKIP_FILES.
 FILTERS=(--exclude ".*" --exclude ".*/**")
+FIND_SKIPS=()
+for pattern in "${SKIP_FILES[@]}"; do
+    FILTERS+=(--exclude "$pattern")
+    FIND_SKIPS+=(-not -name "$pattern")
+done
 
 trim() {
     local s="$1"
@@ -81,6 +90,12 @@ connection_id() {
 # `cardrop cancel` marks a device as skipped until it's unplugged.
 cancel_marker() {
     echo "$DEVICE_STATE_DIR/$(device_slug "$1").cancelled"
+}
+
+# After a failed verification, don't redo the (slow) full check on every mount event:
+# only when new files appear, the device is reconnected, or the user runs `cardrop run`.
+failed_marker() {
+    echo "$DEVICE_STATE_DIR/$(device_slug "$1").failed"
 }
 
 is_cancelled() {  # volume

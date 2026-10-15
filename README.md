@@ -125,6 +125,7 @@ Optional. Copy `~/.config/cardrop/settings.conf.example` to `settings.conf` and 
 | `CHUNK_SIZE` | `64M` | Google Drive upload chunk; RAM used is about `TRANSFERS × CHUNK_SIZE` |
 | `VERIFY` | `checksum` | `checksum` (safest) or `size` (faster) |
 | `NOTIFY_ON_START` | `yes` | Notify when an upload starts |
+| `SKIP_FILES` | `("fileinfo_list.list")` | Files never uploaded or verified. Add patterns with `SKIP_FILES+=("*.THM")` |
 
 ### Other clouds
 
@@ -164,6 +165,12 @@ that finished uploading are kept, and unfinished ones are uploaded next time.
 **Two files with the same name on different days?** Cameras usually put the date and time in file
 names. If a file with the same name already exists at the destination, cardrop never overwrites
 it, and verification then flags the mismatch so you don't clear the card.
+
+**A verification failed. Is my footage OK?** The notification names the files that didn't match,
+and every other file is fine. cardrop won't re-run the slow full check on every disk event after a
+failure. It checks again when new files appear, when you reconnect the device, or when you run
+`cardrop run`. Camera index files that change after every recording (like Insta360's
+`fileinfo_list.list`) are skipped by default, because cardrop never overwrites, so they could never match.
 
 **Will the Google sign-in expire?** Not if your OAuth app is set to *In production* (see the
 [setup guide](docs/google-setup.md)). While it's in *Testing*, Google expires the sign-in after 7 days.
